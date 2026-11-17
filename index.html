@@ -98,6 +98,12 @@ li:first-child{border-top:0}
 .empty{color:var(--dim);font-size:14px;margin:0;padding:6px 0}
 .note{font-size:13px;color:var(--dim);margin:0}
 .ro .write{display:none!important}
+.hdr-right{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.mini.auth{padding:7px 12px;font-size:13px;border-radius:999px}
+.mini.auth.on{color:var(--lamp-ink);background:var(--lamp);border-color:var(--lamp)}
+.mini.ok{color:var(--ok);border-color:rgba(108,199,154,.5)}
+.mini.ok:hover{color:#0f2a1d;background:var(--ok);border-color:var(--ok)}
+.wait{font-size:12px;color:var(--warn);flex:none}
 
 .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
   background:var(--screen);color:#211a2c;font-weight:700;font-size:14px;padding:10px 16px;border-radius:12px;max-width:calc(100% - 32px);transition:opacity .2s,transform .2s;z-index:20}
@@ -109,7 +115,10 @@ li:first-child{border-top:0}
 <div class="wrap" id="app">
   <header>
     <h1>Мега-<span>рулетка</span></h1>
-    <div class="status" id="status" data-s="loading"><span class="dot"></span><span id="statusText">Подключаю общий список…</span></div>
+    <div class="hdr-right">
+      <div class="status" id="status" data-s="loading"><span class="dot"></span><span id="statusText">Подключаю общий список…</span></div>
+      <button class="mini auth" id="authBtn" type="button">Войти</button>
+    </div>
   </header>
 
   <div class="grid">
@@ -136,12 +145,16 @@ li:first-child{border-top:0}
     <div class="panel">
       <section class="box">
         <h2>В рулетке <span class="count" id="qCount">0</span></h2>
-        <form id="addForm" class="write" autocomplete="off">
+        <form id="addForm" autocomplete="off">
           <input type="text" id="addInput" placeholder="Название фильма" maxlength="120" aria-label="Название фильма">
           <button class="btn add" type="submit" id="addBtn">Добавить</button>
         </form>
-        <p class="note" id="roNote" hidden>Крутить можно всем. Добавлять и отмечать фильмы может тот, кому дали доступ на редактирование.</p>
+        <p class="note" id="roNote" hidden>Предложенный фильм попадёт в рулетку, когда его одобрит админ.</p>
         <ul id="qList"></ul>
+      </section>
+      <section class="box" id="sBox" hidden>
+        <h2>Ждут одобрения <span class="count" id="sCount">0</span></h2>
+        <ul id="sList" class="pending"></ul>
       </section>
       <section class="box">
         <h2>Уже посмотрели <span class="count" id="wCount">0</span></h2>
@@ -156,8 +169,24 @@ li:first-child{border-top:0}
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 (function(){
+  /* ======== НАСТРОЙКИ ======== */
+  const DB = "https://ruletka-f12df-default-rtdb.europe-west1.firebasedatabase.app/ruletka";
+  /* Код подключения из Firebase → Project settings → Your apps */
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyC8xrTy5cSxYJQ7cb-0RzOZh3x4pRiiAzI",
+    authDomain: "ruletka-f12df.firebaseapp.com",
+    databaseURL: "https://ruletka-f12df-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "ruletka-f12df",
+    storageBucket: "ruletka-f12df.firebasestorage.app",
+    messagingSenderId: "236765999832",
+    appId: "1:236765999832:web:74b9247ef1b4292cb85dad"
+  };
+  /* ============================ */
+
   const $ = id => document.getElementById(id);
   const SEG = [
     {bg:"#3d2f5c", fg:"#f3ebdb"},
@@ -165,65 +194,139 @@ li:first-child{border-top:0}
     {bg:"#275563", fg:"#eaf6f4"},
     {bg:"#d99a2b", fg:"#2a1d05"}
   ];
-  const LS = "mega-ruletka-v1";
+  const SEED = {"s00": {"title": "Волк с Уолл-стрит", "status": "queue", "addedAt": 1794423000000}, "s01": {"title": "Властелин колец: Братство кольца", "status": "queue", "addedAt": 1794423000001}, "s02": {"title": "Три билборда на границе Эббинга, Миссури", "status": "queue", "addedAt": 1794423000002}, "s03": {"title": "Под покровом ночи", "status": "queue", "addedAt": 1794423000003}, "s04": {"title": "Стрингер", "status": "queue", "addedAt": 1794423000004}, "s05": {"title": "Пленницы", "status": "queue", "addedAt": 1794423000005}, "s06": {"title": "Мальчик в полосатой пижаме", "status": "queue", "addedAt": 1794423000006}, "s07": {"title": "Безбрачная неделя", "status": "queue", "addedAt": 1794423000007}, "s08": {"title": "Семь психопатов", "status": "watched", "addedAt": 1794423000008}, "s09": {"title": "Пятница, 13-е. Часть 3", "status": "watched", "addedAt": 1794423000009}, "s10": {"title": "Большой Лебовски", "status": "watched", "addedAt": 1794423000010}, "s11": {"title": "Святые из Бундока", "status": "watched", "addedAt": 1794423000011}, "s12": {"title": "Горе-творец", "status": "watched", "addedAt": 1794423000012}, "s13": {"title": "Несносные боссы", "status": "watched", "addedAt": 1794423000013}, "s14": {"title": "Суперперцы", "status": "watched", "addedAt": 1794423000014}, "s15": {"title": "День шакала", "status": "watched", "addedAt": 1794423000015}, "s16": {"title": "Моби Дик", "status": "watched", "addedAt": 1794423000016}};
   const reduced = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let films = [];
-  let mode = "loading";          // loading | shared | stale | local | error
-  let col = null;
-  let canWrite = true;
+  let films = [], sugs = [];
+  let mode = "loading";          // loading | shared | stale | error
+  let user = null, isAdmin = false, filmsLoaded = false;
   let rot = 0, spinning = false, spinItems = null, pick = null;
 
-  /* ---------- данные ---------- */
+  const norm = t => String(t || "").trim().toLowerCase();
   const queue = () => films.filter(f => f.status !== "watched")
     .sort((a,b) => (a.addedAt||0) - (b.addedAt||0) || String(a.title).localeCompare(String(b.title)));
   const watched = () => films.filter(f => f.status === "watched")
     .sort((a,b) => (b.watchedAt||0) - (a.watchedAt||0));
 
-  function lsLoad(){ try{ const v = JSON.parse(localStorage.getItem(LS) || "[]"); return Array.isArray(v) ? v : []; }catch(e){ return []; } }
-  function lsSave(){ try{ localStorage.setItem(LS, JSON.stringify(films)); }catch(e){} }
-
-  function onWriteError(e){
-    const code = e && e.code;
-    if(code === "invalid_argument" || code === "not_granted" || code === "revoked"){
-      canWrite = false; render();
-      toast("Менять список у тебя нет доступа. Крутить колесо можно.");
-    } else if(code === "quota_exceeded"){
-      toast("Список переполнен. Удали пару старых фильмов.");
-    } else {
-      toast("Не сохранилось, попробуй ещё раз.");
+  /* ---------- база ---------- */
+  async function req(method, path, body, asAdmin){
+    let url = DB + path + ".json";
+    if(asAdmin && user){ url += "?auth=" + encodeURIComponent(await user.getIdToken()); }
+    const r = await fetch(url, {
+      method, headers:{"Content-Type":"application/json"},
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if(!r.ok) throw {code:r.status};
+    return r.json();
+  }
+  async function adminDo(fn, okMsg){
+    try{ await fn(); if(okMsg) toast(okMsg); return true; }
+    catch(e){
+      if(e && (e.code === 401 || e.code === 403)) toast("Это может делать только админ");
+      else toast("Не сохранилось, проверь интернет");
+      return false;
     }
   }
 
-  async function addFilm(title, status){
-    status = status || "queue";
-    const same = films.find(f => String(f.title).trim().toLowerCase() === title.toLowerCase());
+  async function addOrSuggest(title){
+    if(films.some(f => norm(f.title) === norm(title))){ toast("«" + title + "» уже есть в списке"); return false; }
+    if(sugs.some(x => norm(x.title) === norm(title))){ toast("«" + title + "» уже ждёт одобрения"); return false; }
+    if(isAdmin){
+      return adminDo(() => req("POST", "/films", {title, status:"queue", addedAt:Date.now()}, true), "Добавлено: «" + title + "»");
+    }
+    try{
+      await req("POST", "/suggestions", {title, addedAt:Date.now()});
+      toast("Предложено! Появится в рулетке после одобрения");
+      return true;
+    }catch(e){ toast("Не отправилось, проверь интернет"); return false; }
+  }
+  async function addWatched(title){
+    const same = films.find(f => norm(f.title) === norm(title));
     if(same){
-      if(status === "watched" && same.status !== "watched"){
-        await patch(same.id, {status:"watched", watchedAt:Date.now()});
-        toast("«" + same.title + "» перенесён в просмотренные");
-        return "moved";
+      if(same.status === "watched"){ toast("«" + same.title + "» уже в просмотренных"); return false; }
+      return adminDo(() => req("PATCH", "/films/" + same.id, {status:"watched", watchedAt:Date.now()}, true), "«" + same.title + "» перенесён в просмотренные");
+    }
+    return adminDo(() => req("POST", "/films", {title, status:"watched", addedAt:Date.now(), watchedAt:Date.now()}, true), "В просмотренные: «" + title + "»");
+  }
+  const patchFilm = (id, fields, msg) => adminDo(() => req("PATCH", "/films/" + id, fields, true), msg);
+  const removeFilm = id => adminDo(() => req("DELETE", "/films/" + id, undefined, true));
+  async function approve(x){
+    if(!films.some(f => norm(f.title) === norm(x.title))){
+      const ok = await adminDo(() => req("POST", "/films", {title:x.title, status:"queue", addedAt:Date.now()}, true));
+      if(!ok) return;
+    }
+    adminDo(() => req("DELETE", "/suggestions/" + x.id, undefined, true), "«" + x.title + "» теперь в рулетке");
+  }
+  const reject = x => adminDo(() => req("DELETE", "/suggestions/" + x.id, undefined, true), "Отклонено: «" + x.title + "»");
+  async function seedIfNeeded(){
+    if(!isAdmin || !filmsLoaded || films.length) return;
+    try{
+      if(await req("GET", "/seeded")) return;
+      await req("PATCH", "/films", SEED, true);
+      await req("PUT", "/seeded", true, true);
+    }catch(e){}
+  }
+
+  /* ---------- живое обновление ---------- */
+  function apply(store, kind, msg){
+    const data = msg.data;
+    const parts = String(msg.path || "/").split("/").filter(Boolean);
+    if(!parts.length){
+      if(kind === "put") return data || {};
+      Object.keys(data || {}).forEach(k => { if(data[k] === null) delete store[k]; else store[k] = data[k]; });
+      return store;
+    }
+    const id = parts[0];
+    if(parts.length === 1){
+      if(kind === "put"){ if(data === null) delete store[id]; else store[id] = data; }
+      else {
+        store[id] = Object.assign({}, store[id] || {}, data);
+        Object.keys(data || {}).forEach(k => { if(data[k] === null) delete store[id][k]; });
       }
-      toast("«" + title + "» уже есть в списке"); return false;
+      return store;
     }
-    const body = {title, status, addedAt:Date.now(), watchedAt: status === "watched" ? Date.now() : null};
-    if(mode === "local"){
-      films.push(Object.assign({id:"l" + Date.now().toString(36) + Math.random().toString(36).slice(2,6)}, body));
-      lsSave(); render(); return true;
-    }
-    try{ await col.add(body); return true; }catch(e){ onWriteError(e); return false; }
+    store[id] = store[id] || {};
+    if(data === null) delete store[id][parts[1]]; else store[id][parts[1]] = data;
+    return store;
   }
-  async function patch(id, fields){
-    if(mode === "local"){
-      const f = films.find(x => x.id === id); if(!f) return;
-      Object.assign(f, fields); lsSave(); render(); return;
-    }
-    try{ await col.doc(id).update(fields); }catch(e){ onWriteError(e); }
+  const toList = st => Object.keys(st).filter(id => st[id] && st[id].title).map(id => Object.assign({id}, st[id]));
+  function listen(path, onData){
+    let st = {};
+    const es = new EventSource(DB + path + ".json");
+    const h = kind => ev => {
+      let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+      if(!m) return;
+      st = apply(st, kind, m); onData(st);
+    };
+    es.addEventListener("put", h("put"));
+    es.addEventListener("patch", h("patch"));
+    es.addEventListener("cancel", () => { mode = "error"; render(); });
+    return es;
   }
-  async function remove(id){
-    if(mode === "local"){ films = films.filter(x => x.id !== id); lsSave(); render(); return; }
-    try{ await col.doc(id).delete(); }catch(e){ onWriteError(e); }
+
+  /* ---------- вход админа ---------- */
+  let auth = null;
+  function initAuth(){
+    if(!window.firebase || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey){ $("authBtn").hidden = true; return; }
+    try{ firebase.initializeApp(FIREBASE_CONFIG); auth = firebase.auth(); }
+    catch(e){ $("authBtn").hidden = true; return; }
+    auth.onAuthStateChanged(async u => {
+      user = u; isAdmin = false; render();
+      if(!u) return;
+      try{ await req("PUT", "/adminCheck", true, true); isAdmin = true; toast("Ты вошёл как админ"); }
+      catch(e){ toast("Этот аккаунт не админ. Можно только предлагать фильмы"); }
+      render(); seedIfNeeded();
+    });
   }
+  $("authBtn").addEventListener("click", () => {
+    if(!auth) return;
+    if(user){ auth.signOut(); return; }
+    auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e => {
+      if(e && e.code === "auth/popup-blocked") toast("Браузер заблокировал окно входа. Разреши всплывающие окна");
+      else if(e && e.code === "auth/unauthorized-domain") toast("Сайт не добавлен в Authorized domains в Firebase");
+      else if(e && e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") toast("Вход не удался");
+    });
+  });
 
   /* ---------- колесо ---------- */
   const canvas = $("wheel");
@@ -246,10 +349,7 @@ li:first-child{border-top:0}
     ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.clearRect(0,0,size,size);
     const c = size/2, R = c - 8;
-
-    // обод
     ctx.beginPath(); ctx.arc(c,c,R+5,0,Math.PI*2); ctx.fillStyle = "#0e0c14"; ctx.fill();
-
     if(!items.length){
       ctx.beginPath(); ctx.arc(c,c,R,0,Math.PI*2); ctx.fillStyle = "#1f1a2b"; ctx.fill();
       ctx.setLineDash([6,8]); ctx.strokeStyle = "#352d49"; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
@@ -271,20 +371,16 @@ li:first-child{border-top:0}
       ctx.fillText(fit(ctx, String(items[i].title), R*0.66), R - 14, 0);
       ctx.restore();
     }
-    // лампочки по ободу
     const bulbs = 24;
     for(let b=0;b<bulbs;b++){
       const a = b/bulbs*Math.PI*2;
       ctx.beginPath(); ctx.arc(c + Math.cos(a)*(R+1), c + Math.sin(a)*(R+1), 2.2, 0, Math.PI*2);
       ctx.fillStyle = b % 2 ? "#f2b544" : "#f3ebdb"; ctx.fill();
     }
-    // центр
     ctx.beginPath(); ctx.arc(c,c,R*0.13,0,Math.PI*2); ctx.fillStyle = "#15121d"; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = "#f2b544"; ctx.stroke();
   }
-
   function rnd(){ try{ const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; }catch(e){ return Math.random(); } }
-
   function spin(){
     const items = queue();
     if(spinning || !items.length) return;
@@ -312,7 +408,6 @@ li:first-child{border-top:0}
     }
     requestAnimationFrame(frame);
   }
-
   function showTicket(f){
     pick = f;
     $("tTitle").textContent = f.title;
@@ -324,9 +419,8 @@ li:first-child{border-top:0}
   /* ---------- отрисовка ---------- */
   const STATUS = {
     loading:"Подключаю общий список…",
-    shared:"Общий список · изменения видны всем сразу",
+    shared:"Общий список · обновляется у всех",
     stale:"Список пока не отвечает, показываю последнее",
-    local:"Список хранится в этом браузере",
     error:"Общий список отключился. Обнови страницу"
   };
   function fmt(ms){
@@ -334,13 +428,20 @@ li:first-child{border-top:0}
     const d = new Date(ms);
     return String(d.getDate()).padStart(2,"0") + "." + String(d.getMonth()+1).padStart(2,"0");
   }
-
+  function btn(text, cls, onClick){
+    const b = document.createElement("button"); b.type = "button"; b.className = "mini " + (cls || ""); b.textContent = text;
+    b.addEventListener("click", onClick); return b;
+  }
   function render(){
     $("status").dataset.s = mode;
     $("statusText").textContent = STATUS[mode];
-    const ro = !canWrite || mode === "error";
-    $("app").classList.toggle("ro", ro);
-    $("roNote").hidden = !ro || mode === "loading";
+    $("app").classList.toggle("ro", !isAdmin);
+    $("roNote").hidden = isAdmin || mode === "loading";
+    const ab = $("authBtn");
+    ab.textContent = user ? (isAdmin ? "Админ · выйти" : "Выйти") : "Войти";
+    ab.classList.toggle("on", isAdmin);
+    $("addInput").placeholder = isAdmin ? "Название фильма" : "Предложить фильм";
+    $("addBtn").textContent = isAdmin ? "Добавить" : "Предложить";
     $("addInput").disabled = $("addBtn").disabled = mode === "loading";
     $("addWInput").disabled = $("addWBtn").disabled = mode === "loading";
 
@@ -353,23 +454,32 @@ li:first-child{border-top:0}
     const ql = $("qList"); ql.textContent = "";
     if(!q.length){
       const p = document.createElement("p"); p.className = "empty";
-      p.textContent = mode === "loading" ? "Загружаю фильмы…" : "Пока пусто. Впиши первый фильм выше.";
+      p.textContent = mode === "loading" ? "Загружаю фильмы…" : "Пока пусто.";
       ql.appendChild(p);
     }
     q.forEach((f,i) => {
       const li = document.createElement("li");
       const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = colorFor(i, q.length).bg;
       const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
-      const del = document.createElement("button"); del.type = "button"; del.className = "mini write"; del.textContent = "Убрать";
-      del.addEventListener("click", () => {
-        if(del.classList.contains("confirm")){ remove(f.id); return; }
+      const seen = btn("Смотрели", "write", () => patchFilm(f.id, {status:"watched", watchedAt:Date.now()}, "«" + f.title + "» ушёл в просмотренные"));
+      const del = btn("Убрать", "write", () => {
+        if(del.classList.contains("confirm")){ removeFilm(f.id); return; }
         del.classList.add("confirm"); del.textContent = "Точно?";
         setTimeout(() => { del.classList.remove("confirm"); del.textContent = "Убрать"; }, 3000);
       });
-      const seen = document.createElement("button"); seen.type = "button"; seen.className = "mini write"; seen.textContent = "Смотрели";
-      seen.title = "Перенести в просмотренные без колеса";
-      seen.addEventListener("click", () => { patch(f.id, {status:"watched", watchedAt:Date.now()}); toast("«" + f.title + "» ушёл в просмотренные"); });
       li.append(sw, nm, seen, del); ql.appendChild(li);
+    });
+
+    const sl = $("sList"); sl.textContent = "";
+    $("sBox").hidden = !sugs.length;
+    $("sCount").textContent = sugs.length;
+    sugs.slice().sort((a,b) => (a.addedAt||0) - (b.addedAt||0)).forEach(x => {
+      const li = document.createElement("li");
+      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = x.title;
+      li.appendChild(nm);
+      if(isAdmin){ li.append(btn("Одобрить", "ok", () => approve(x)), btn("Отклонить", "", () => reject(x))); }
+      else { const t = document.createElement("span"); t.className = "wait"; t.textContent = "на проверке"; li.appendChild(t); }
+      sl.appendChild(li);
     });
 
     const wl = $("wList"); wl.textContent = "";
@@ -382,18 +492,16 @@ li:first-child{border-top:0}
       const li = document.createElement("li");
       const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
       const wh = document.createElement("span"); wh.className = "when"; wh.textContent = fmt(f.watchedAt);
-      const back = document.createElement("button"); back.type = "button"; back.className = "mini write"; back.textContent = "Вернуть";
-      back.addEventListener("click", () => patch(f.id, {status:"queue", watchedAt:null}));
-      li.append(nm, wh, back); wl.appendChild(li);
+      li.append(nm, wh, btn("Вернуть", "write", () => patchFilm(f.id, {status:"queue", watchedAt:null})));
+      wl.appendChild(li);
     });
 
     if(!spinning) draw(q);
   }
-
   let tt;
   function toast(msg){
     const t = $("toast"); t.textContent = msg; t.classList.add("on");
-    clearTimeout(tt); tt = setTimeout(() => t.classList.remove("on"), 2800);
+    clearTimeout(tt); tt = setTimeout(() => t.classList.remove("on"), 3000);
   }
 
   /* ---------- события ---------- */
@@ -403,104 +511,38 @@ li:first-child{border-top:0}
     if(!pick) return;
     const f = films.find(x => x.id === pick.id);
     if(!f){ toast("Этот фильм уже убрали из списка"); hideTicket(); return; }
-    const title = f.title;
     hideTicket();
-    await patch(f.id, {status:"watched", watchedAt:Date.now()});
-    toast("«" + title + "» ушёл в просмотренные");
+    patchFilm(f.id, {status:"watched", watchedAt:Date.now()}, "«" + f.title + "» ушёл в просмотренные");
   });
   $("addForm").addEventListener("submit", async e => {
     e.preventDefault();
     const inp = $("addInput"); const v = inp.value.replace(/\s+/g," ").trim();
-    if(!v) { inp.focus(); return; }
-    const ok = await addFilm(v);
-    if(ok){ inp.value = ""; toast("Добавлено: «" + v + "»"); }
+    if(!v){ inp.focus(); return; }
+    if(await addOrSuggest(v)) inp.value = "";
     inp.focus();
   });
   $("addWForm").addEventListener("submit", async e => {
     e.preventDefault();
     const inp = $("addWInput"); const v = inp.value.replace(/\s+/g," ").trim();
-    if(!v) { inp.focus(); return; }
-    const ok = await addFilm(v, "watched");
-    if(ok){ inp.value = ""; if(ok === true) toast("В просмотренные: «" + v + "»"); }
+    if(!v){ inp.focus(); return; }
+    if(await addWatched(v)) inp.value = "";
     inp.focus();
   });
   let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if(!spinning) draw(queue()); }, 80); });
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if(!spinning) draw(queue()); });
 
-  /* ---------- запуск: общий список в Firebase ---------- */
-  const DB = "https://ruletka-f12df-default-rtdb.europe-west1.firebasedatabase.app/ruletka";
-  const SEED = {"s00": {"title": "Волк с Уолл-стрит", "status": "queue", "addedAt": 1794423000000}, "s01": {"title": "Властелин колец: Братство кольца", "status": "queue", "addedAt": 1794423000001}, "s02": {"title": "Три билборда на границе Эббинга, Миссури", "status": "queue", "addedAt": 1794423000002}, "s03": {"title": "Под покровом ночи", "status": "queue", "addedAt": 1794423000003}, "s04": {"title": "Стрингер", "status": "queue", "addedAt": 1794423000004}, "s05": {"title": "Пленницы", "status": "queue", "addedAt": 1794423000005}, "s06": {"title": "Мальчик в полосатой пижаме", "status": "queue", "addedAt": 1794423000006}, "s07": {"title": "Безбрачная неделя", "status": "queue", "addedAt": 1794423000007}, "s08": {"title": "Семь психопатов", "status": "watched", "addedAt": 1794423000008}, "s09": {"title": "Пятница, 13-е. Часть 3", "status": "watched", "addedAt": 1794423000009}, "s10": {"title": "Большой Лебовски", "status": "watched", "addedAt": 1794423000010}, "s11": {"title": "Святые из Бундока", "status": "watched", "addedAt": 1794423000011}, "s12": {"title": "Горе-творец", "status": "watched", "addedAt": 1794423000012}, "s13": {"title": "Несносные боссы", "status": "watched", "addedAt": 1794423000013}, "s14": {"title": "Суперперцы", "status": "watched", "addedAt": 1794423000014}, "s15": {"title": "День шакала", "status": "watched", "addedAt": 1794423000015}, "s16": {"title": "Моби Дик", "status": "watched", "addedAt": 1794423000016}};
-  let store = {};
-  function sync(){
-    films = Object.keys(store).filter(id => store[id] && store[id].title)
-      .map(id => Object.assign({id}, store[id]));
-    render();
-  }
-  async function req(method, path, body){
-    const r = await fetch(DB + path + ".json", {
-      method, headers:{"Content-Type":"application/json"},
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if(!r.ok) throw {code:"http_" + r.status};
-    return r.json();
-  }
-  col = {
-    add: body => req("POST", "/films", body),
-    doc: id => ({
-      update: fields => req("PATCH", "/films/" + id, fields),
-      delete: () => req("DELETE", "/films/" + id)
-    })
-  };
-  function applyEvent(kind, msg){
-    const data = msg.data;
-    const parts = String(msg.path || "/").split("/").filter(Boolean);
-    if(!parts.length){
-      if(kind === "put") store = data || {};
-      else Object.keys(data || {}).forEach(k => { if(data[k] === null) delete store[k]; else store[k] = data[k]; });
-      return;
-    }
-    const id = parts[0];
-    if(parts.length === 1){
-      if(kind === "put"){ if(data === null) delete store[id]; else store[id] = data; }
-      else {
-        store[id] = Object.assign({}, store[id] || {}, data);
-        Object.keys(data || {}).forEach(k => { if(data[k] === null) delete store[id][k]; });
-      }
-      return;
-    }
-    store[id] = store[id] || {};
-    if(data === null) delete store[id][parts[1]]; else store[id][parts[1]] = data;
-  }
-  async function seedIfNeeded(){
-    try{
-      if(await req("GET", "/seeded")) return;
-      await req("PATCH", "/films", SEED);
-      await req("PUT", "/seeded", true);
-    }catch(e){}
-  }
-  function start(){
-    render();
-    if(!("EventSource" in window)){ mode = "error"; render(); return; }
-    const timer = setTimeout(() => { if(mode === "loading"){ mode = "stale"; render(); } }, 10000);
-    let first = true;
-    const es = new EventSource(DB + "/films.json");
-    const handle = kind => ev => {
-      let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
-      if(!msg) return;
-      applyEvent(kind, msg);
-      if(first){
-        first = false; clearTimeout(timer);
-        if(msg.data === null && (msg.path || "/") === "/") seedIfNeeded();
-      }
-      mode = "shared"; sync();
-    };
-    es.addEventListener("put", handle("put"));
-    es.addEventListener("patch", handle("patch"));
-    es.addEventListener("cancel", () => { mode = "error"; render(); });
-    es.onerror = () => { if(mode === "shared"){ mode = "stale"; render(); } };
-    es.onopen = () => { if(mode === "stale"){ mode = "shared"; render(); } };
-  }
-  start();
+  /* ---------- запуск ---------- */
+  render();
+  initAuth();
+  if(!("EventSource" in window)){ mode = "error"; render(); return; }
+  const timer = setTimeout(() => { if(mode === "loading"){ mode = "stale"; render(); } }, 10000);
+  const fes = listen("/films", st => {
+    films = toList(st); filmsLoaded = true;
+    clearTimeout(timer); mode = "shared"; render(); seedIfNeeded();
+  });
+  fes.onerror = () => { if(mode === "shared"){ mode = "stale"; render(); } };
+  fes.onopen = () => { if(mode === "stale"){ mode = "shared"; render(); } };
+  listen("/suggestions", st => { sugs = toList(st); render(); });
 })();
 </script>
 </body>
