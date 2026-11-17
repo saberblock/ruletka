@@ -104,6 +104,14 @@ li:first-child{border-top:0}
 .mini.ok{color:var(--ok);border-color:rgba(108,199,154,.5)}
 .mini.ok:hover{color:#0f2a1d;background:var(--ok);border-color:var(--ok)}
 .wait{font-size:12px;color:var(--warn);flex:none}
+form.f3{display:grid;grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr) auto;gap:8px}
+form.f3 #addInput,form.f3 #addWInput{grid-column:1/-1}
+form.f3 input[type=number]{min-width:0;font:inherit;color:var(--screen);background:var(--hall);border:1px solid var(--line);border-radius:12px;padding:12px 10px;-moz-appearance:textfield}
+form.f3 input[type=number]::-webkit-inner-spin-button,form.f3 input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+@media (max-width:420px){form.f3{grid-template-columns:84px minmax(0,1fr)}form.f3 .btn{grid-column:1/-1}}
+.name small{display:block;font-size:12px;color:var(--dim);margin-top:1px}
+.t-meta{font-size:13px;font-weight:600;color:#6b5f7d}
+.bad{border-color:var(--warn)!important}
 
 .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
   background:var(--screen);color:#211a2c;font-weight:700;font-size:14px;padding:10px 16px;border-radius:12px;max-width:calc(100% - 32px);transition:opacity .2s,transform .2s;z-index:20}
@@ -133,6 +141,7 @@ li:first-child{border-top:0}
         <div class="t-main">
           <span class="t-label">Выпало</span>
           <span class="t-title" id="tTitle"></span>
+          <span class="t-meta" id="tMeta"></span>
         </div>
         <div class="t-side"><small>СЕАНС</small><b id="tNum">1</b><small>20:00 КИЕВ</small></div>
         <div class="t-actions">
@@ -145,8 +154,10 @@ li:first-child{border-top:0}
     <div class="panel">
       <section class="box">
         <h2>В рулетке <span class="count" id="qCount">0</span></h2>
-        <form id="addForm" autocomplete="off">
+        <form id="addForm" class="f3" autocomplete="off">
           <input type="text" id="addInput" placeholder="Название фильма" maxlength="120" aria-label="Название фильма">
+          <input type="number" id="addYear" placeholder="Год" min="1888" max="2100" inputmode="numeric" aria-label="Год выхода">
+          <input type="text" id="addWho" placeholder="Кто добавил" maxlength="30" aria-label="Кто добавил">
           <button class="btn add" type="submit" id="addBtn">Добавить</button>
         </form>
         <p class="note" id="roNote" hidden>Предложенный фильм попадёт в рулетку, когда его одобрит админ.</p>
@@ -158,8 +169,10 @@ li:first-child{border-top:0}
       </section>
       <section class="box">
         <h2>Уже посмотрели <span class="count" id="wCount">0</span></h2>
-        <form id="addWForm" class="write" autocomplete="off">
+        <form id="addWForm" class="write f3" autocomplete="off">
           <input type="text" id="addWInput" placeholder="Фильм, который уже видели" maxlength="120" aria-label="Фильм, который уже видели">
+          <input type="number" id="addWYear" placeholder="Год" min="1888" max="2100" inputmode="numeric" aria-label="Год выхода">
+          <input type="text" id="addWWho" placeholder="Кто добавил" maxlength="30" aria-label="Кто добавил">
           <button class="btn add" type="submit" id="addWBtn">Добавить</button>
         </form>
         <ul id="wList" class="watched"></ul>
@@ -203,6 +216,27 @@ li:first-child{border-top:0}
   let rot = 0, spinning = false, spinItems = null, pick = null;
 
   const norm = t => String(t || "").trim().toLowerCase();
+  const WHO_KEY = "mega-ruletka-who";
+  const metaText = f => [f.year ? f.year + " г." : "", f.by ? "добавил(а) " + f.by : ""].filter(Boolean).join(" · ");
+  function nameCell(f){
+    const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
+    const m = metaText(f);
+    if(m){ const sm = document.createElement("small"); sm.textContent = m; nm.appendChild(sm); }
+    return nm;
+  }
+  function readForm(tId, yId, wId){
+    const t = $(tId), y = $(yId), w = $(wId);
+    [t,y,w].forEach(el => el.classList.remove("bad"));
+    const title = t.value.replace(/\s+/g," ").trim();
+    const year = parseInt(y.value, 10);
+    const by = w.value.replace(/\s+/g," ").trim().slice(0,30);
+    const maxY = new Date().getFullYear() + 2;
+    if(!title){ t.classList.add("bad"); t.focus(); toast("Впиши название фильма"); return null; }
+    if(!(year >= 1888 && year <= maxY)){ y.classList.add("bad"); y.focus(); toast("Впиши год выхода фильма"); return null; }
+    if(!by){ w.classList.add("bad"); w.focus(); toast("Впиши, кто добавляет"); return null; }
+    try{ localStorage.setItem(WHO_KEY, by); }catch(e){}
+    return {title, year, by};
+  }
   const queue = () => films.filter(f => f.status !== "watched")
     .sort((a,b) => (a.addedAt||0) - (b.addedAt||0) || String(a.title).localeCompare(String(b.title)));
   const watched = () => films.filter(f => f.status === "watched")
@@ -228,31 +262,35 @@ li:first-child{border-top:0}
     }
   }
 
-  async function addOrSuggest(title){
+  async function addOrSuggest(d){
+    const title = d.title;
     if(films.some(f => norm(f.title) === norm(title))){ toast("«" + title + "» уже есть в списке"); return false; }
     if(sugs.some(x => norm(x.title) === norm(title))){ toast("«" + title + "» уже ждёт одобрения"); return false; }
     if(isAdmin){
-      return adminDo(() => req("POST", "/films", {title, status:"queue", addedAt:Date.now()}, true), "Добавлено: «" + title + "»");
+      return adminDo(() => req("POST", "/films", {title, year:d.year, by:d.by, status:"queue", addedAt:Date.now()}, true), "Добавлено: «" + title + "»");
     }
     try{
-      await req("POST", "/suggestions", {title, addedAt:Date.now()});
+      await req("POST", "/suggestions", {title, year:d.year, by:d.by, addedAt:Date.now()});
       toast("Предложено! Появится в рулетке после одобрения");
       return true;
     }catch(e){ toast("Не отправилось, проверь интернет"); return false; }
   }
-  async function addWatched(title){
+  async function addWatched(d){
+    const title = d.title;
     const same = films.find(f => norm(f.title) === norm(title));
     if(same){
       if(same.status === "watched"){ toast("«" + same.title + "» уже в просмотренных"); return false; }
       return adminDo(() => req("PATCH", "/films/" + same.id, {status:"watched", watchedAt:Date.now()}, true), "«" + same.title + "» перенесён в просмотренные");
     }
-    return adminDo(() => req("POST", "/films", {title, status:"watched", addedAt:Date.now(), watchedAt:Date.now()}, true), "В просмотренные: «" + title + "»");
+    return adminDo(() => req("POST", "/films", {title, year:d.year, by:d.by, status:"watched", addedAt:Date.now(), watchedAt:Date.now()}, true), "В просмотренные: «" + title + "»");
   }
   const patchFilm = (id, fields, msg) => adminDo(() => req("PATCH", "/films/" + id, fields, true), msg);
   const removeFilm = id => adminDo(() => req("DELETE", "/films/" + id, undefined, true));
   async function approve(x){
     if(!films.some(f => norm(f.title) === norm(x.title))){
-      const ok = await adminDo(() => req("POST", "/films", {title:x.title, status:"queue", addedAt:Date.now()}, true));
+      const body = {title:x.title, status:"queue", addedAt:Date.now()};
+      if(x.year) body.year = x.year; if(x.by) body.by = x.by;
+      const ok = await adminDo(() => req("POST", "/films", body, true));
       if(!ok) return;
     }
     adminDo(() => req("DELETE", "/suggestions/" + x.id, undefined, true), "«" + x.title + "» теперь в рулетке");
@@ -411,6 +449,7 @@ li:first-child{border-top:0}
   function showTicket(f){
     pick = f;
     $("tTitle").textContent = f.title;
+    $("tMeta").textContent = metaText(f);
     $("tNum").textContent = String(watched().length + 1);
     $("ticket").hidden = false;
   }
@@ -460,7 +499,7 @@ li:first-child{border-top:0}
     q.forEach((f,i) => {
       const li = document.createElement("li");
       const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = colorFor(i, q.length).bg;
-      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
+      const nm = nameCell(f);
       const seen = btn("Смотрели", "write", () => patchFilm(f.id, {status:"watched", watchedAt:Date.now()}, "«" + f.title + "» ушёл в просмотренные"));
       const del = btn("Убрать", "write", () => {
         if(del.classList.contains("confirm")){ removeFilm(f.id); return; }
@@ -475,8 +514,7 @@ li:first-child{border-top:0}
     $("sCount").textContent = sugs.length;
     sugs.slice().sort((a,b) => (a.addedAt||0) - (b.addedAt||0)).forEach(x => {
       const li = document.createElement("li");
-      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = x.title;
-      li.appendChild(nm);
+      li.appendChild(nameCell(x));
       if(isAdmin){ li.append(btn("Одобрить", "ok", () => approve(x)), btn("Отклонить", "", () => reject(x))); }
       else { const t = document.createElement("span"); t.className = "wait"; t.textContent = "на проверке"; li.appendChild(t); }
       sl.appendChild(li);
@@ -490,7 +528,7 @@ li:first-child{border-top:0}
     }
     w.forEach(f => {
       const li = document.createElement("li");
-      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
+      const nm = nameCell(f);
       const wh = document.createElement("span"); wh.className = "when"; wh.textContent = fmt(f.watchedAt);
       li.append(nm, wh, btn("Вернуть", "write", () => patchFilm(f.id, {status:"queue", watchedAt:null})));
       wl.appendChild(li);
@@ -516,22 +554,21 @@ li:first-child{border-top:0}
   });
   $("addForm").addEventListener("submit", async e => {
     e.preventDefault();
-    const inp = $("addInput"); const v = inp.value.replace(/\s+/g," ").trim();
-    if(!v){ inp.focus(); return; }
-    if(await addOrSuggest(v)) inp.value = "";
-    inp.focus();
+    const d = readForm("addInput", "addYear", "addWho"); if(!d) return;
+    if(await addOrSuggest(d)){ $("addInput").value = ""; $("addYear").value = ""; }
+    $("addInput").focus();
   });
   $("addWForm").addEventListener("submit", async e => {
     e.preventDefault();
-    const inp = $("addWInput"); const v = inp.value.replace(/\s+/g," ").trim();
-    if(!v){ inp.focus(); return; }
-    if(await addWatched(v)) inp.value = "";
-    inp.focus();
+    const d = readForm("addWInput", "addWYear", "addWWho"); if(!d) return;
+    if(await addWatched(d)){ $("addWInput").value = ""; $("addWYear").value = ""; }
+    $("addWInput").focus();
   });
   let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if(!spinning) draw(queue()); }, 80); });
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if(!spinning) draw(queue()); });
 
   /* ---------- запуск ---------- */
+  try{ const w = localStorage.getItem(WHO_KEY); if(w){ $("addWho").value = w; $("addWWho").value = w; } }catch(e){}
   render();
   initAuth();
   if(!("EventSource" in window)){ mode = "error"; render(); return; }
