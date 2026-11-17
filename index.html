@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Мега-рулетка</title>
+<meta name="description" content="Кино-рулетка для вечеров в Дискорде: добавляешь фильмы, крутишь колесо, просмотренные уходят в отдельный список.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Manrope:wght@400;600;700&display=swap">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+<style>
+/* Layout: тёмный кинозал — колесо слева как экран, список фильмов справа; на телефоне всё в одну колонку */
+:root{
+  --hall:#15121d;      /* зал */
+  --seat:#1f1a2b;      /* панели */
+  --line:#352d49;      /* границы */
+  --screen:#f3ebdb;    /* основной текст */
+  --dim:#a89fbb;       /* второстепенный текст */
+  --lamp:#f2b544;      /* свет проектора, акцент */
+  --lamp-ink:#2a1d05;  /* текст на акценте */
+  --velvet:#a42d48;    /* бархат занавеса */
+  --ok:#6cc79a;
+  --warn:#e8a04a;
+  --font-display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --font-body:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{background:var(--hall);color:var(--screen)}
+body{
+  font-family:var(--font-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:20px 40px;
+}
+.wrap{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 20px}
+h1{font-family:var(--font-display);font-weight:800;font-size:clamp(26px,6vw,40px);line-height:1.05;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h1 span{color:var(--lamp)}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);padding:6px 12px;border:1px solid var(--line);border-radius:999px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
+.status[data-s="shared"] .dot{background:var(--ok)}
+.status[data-s="stale"] .dot,.status[data-s="error"] .dot{background:var(--warn)}
+.status[data-s="local"] .dot{background:var(--lamp)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:780px){.grid{grid-template-columns:minmax(0,1fr)}}
+
+.stage{display:flex;flex-direction:column;align-items:center;gap:16px;padding:20px 16px;background:var(--seat);border:1px solid var(--line);border-radius:18px}
+.wheel-box{position:relative;width:min(100%,440px);aspect-ratio:1/1;max-width:100%}
+canvas{width:100%;height:100%;display:block}
+.pointer{position:absolute;left:50%;top:-6px;transform:translateX(-50%);width:0;height:0;
+  border-left:14px solid transparent;border-right:14px solid transparent;border-top:26px solid var(--lamp);
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.5));z-index:2}
+.btn{font:inherit;font-weight:700;border:0;border-radius:12px;padding:12px 18px;cursor:pointer;transition:transform .12s,filter .12s,background .12s}
+.btn:focus-visible,input:focus-visible,.mini:focus-visible{outline:3px solid var(--lamp);outline-offset:2px}
+.btn:active{transform:scale(.97)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;transform:none}
+.spin{font-family:var(--font-display);font-weight:800;font-size:18px;letter-spacing:.06em;text-transform:uppercase;background:var(--lamp);color:var(--lamp-ink);padding:16px 34px;border-radius:999px;box-shadow:0 0 0 6px rgba(242,181,68,.14)}
+.spin:hover:not([disabled]){filter:brightness(1.07)}
+.hint{margin:0;font-size:13px;color:var(--dim);text-align:center}
+
+/* Билет с результатом */
+.ticket{width:100%;max-width:440px;display:grid;grid-template-columns:minmax(0,1fr) auto;background:var(--screen);color:#211a2c;border-radius:14px;overflow:hidden;position:relative}
+.ticket::before,.ticket::after{content:"";position:absolute;width:20px;height:20px;border-radius:50%;background:var(--seat);right:86px}
+.ticket::before{top:-10px}.ticket::after{bottom:-10px}
+.t-main{padding:16px 18px;min-width:0;display:flex;flex-direction:column;gap:4px}
+.t-label{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--velvet)}
+.t-title{font-family:var(--font-display);font-weight:800;font-size:clamp(18px,4.6vw,24px);line-height:1.15;overflow-wrap:anywhere;text-wrap:balance}
+.t-side{width:96px;border-left:2px dashed #c9bfa9;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px;text-align:center;font-variant-numeric:tabular-nums}
+.t-side b{font-family:var(--font-display);font-size:22px;line-height:1}
+.t-side small{font-size:11px;font-weight:700;letter-spacing:.06em;color:#6b5f7d}
+.t-actions{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;padding:0 18px 16px}
+.t-actions .btn{padding:10px 14px;font-size:14px}
+.go{background:var(--velvet);color:#fff}
+.again{background:transparent;color:#211a2c;box-shadow:inset 0 0 0 2px #211a2c}
+
+/* Списки */
+.panel{display:flex;flex-direction:column;gap:16px}
+.box{background:var(--seat);border:1px solid var(--line);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.box h2{margin:0;font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:.02em;display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.count{font-family:var(--font-body);font-weight:700;font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+form{display:flex;gap:8px}
+input[type=text]{flex:1;min-width:0;font:inherit;color:var(--screen);background:var(--hall);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+input::placeholder{color:#7d7392}
+.add{background:var(--lamp);color:var(--lamp-ink)}
+ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+li{display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--line);min-width:0}
+li:first-child{border-top:0}
+.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.name{flex:1;min-width:0;overflow-wrap:anywhere}
+.when{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
+.mini{font:inherit;font-size:12px;font-weight:700;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:5px 9px;cursor:pointer;flex:none}
+.mini:hover{color:var(--screen);border-color:var(--dim)}
+.mini.confirm{color:#fff;background:var(--velvet);border-color:var(--velvet)}
+.watched .name{color:var(--dim);text-decoration:line-through;text-decoration-color:rgba(168,159,187,.5)}
+.empty{color:var(--dim);font-size:14px;margin:0;padding:6px 0}
+.note{font-size:13px;color:var(--dim);margin:0}
+.ro .write{display:none!important}
+
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
+  background:var(--screen);color:#211a2c;font-weight:700;font-size:14px;padding:10px 16px;border-radius:12px;max-width:calc(100% - 32px);transition:opacity .2s,transform .2s;z-index:20}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <h1>Мега-<span>рулетка</span></h1>
+    <div class="status" id="status" data-s="loading"><span class="dot"></span><span id="statusText">Подключаю общий список…</span></div>
+  </header>
+
+  <div class="grid">
+    <section class="stage" aria-label="Колесо">
+      <div class="wheel-box">
+        <div class="pointer" aria-hidden="true"></div>
+        <canvas id="wheel" role="img" aria-label="Колесо с фильмами"></canvas>
+      </div>
+      <button class="btn spin" id="spinBtn" type="button">Крутить</button>
+      <p class="hint" id="hint">Колесо выбирает только из тех, что ещё не смотрели.</p>
+      <div class="ticket" id="ticket" hidden aria-live="polite">
+        <div class="t-main">
+          <span class="t-label">Выпало</span>
+          <span class="t-title" id="tTitle"></span>
+        </div>
+        <div class="t-side"><small>СЕАНС</small><b id="tNum">1</b><small>20:00 КИЕВ</small></div>
+        <div class="t-actions">
+          <button class="btn go write" id="watchBtn" type="button">Смотрим, в просмотренные</button>
+          <button class="btn again" id="againBtn" type="button">Крутить ещё</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="panel">
+      <section class="box">
+        <h2>В рулетке <span class="count" id="qCount">0</span></h2>
+        <form id="addForm" class="write" autocomplete="off">
+          <input type="text" id="addInput" placeholder="Название фильма" maxlength="120" aria-label="Название фильма">
+          <button class="btn add" type="submit" id="addBtn">Добавить</button>
+        </form>
+        <p class="note" id="roNote" hidden>Крутить можно всем. Добавлять и отмечать фильмы может тот, кому дали доступ на редактирование.</p>
+        <ul id="qList"></ul>
+      </section>
+      <section class="box">
+        <h2>Уже посмотрели <span class="count" id="wCount">0</span></h2>
+        <form id="addWForm" class="write" autocomplete="off">
+          <input type="text" id="addWInput" placeholder="Фильм, который уже видели" maxlength="120" aria-label="Фильм, который уже видели">
+          <button class="btn add" type="submit" id="addWBtn">Добавить</button>
+        </form>
+        <ul id="wList" class="watched"></ul>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const SEG = [
+    {bg:"#3d2f5c", fg:"#f3ebdb"},
+    {bg:"#a42d48", fg:"#fff4f0"},
+    {bg:"#275563", fg:"#eaf6f4"},
+    {bg:"#d99a2b", fg:"#2a1d05"}
+  ];
+  const LS = "mega-ruletka-v1";
+  const reduced = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let films = [];
+  let mode = "loading";          // loading | shared | stale | local | error
+  let col = null;
+  let canWrite = true;
+  let rot = 0, spinning = false, spinItems = null, pick = null;
+
+  /* ---------- данные ---------- */
+  const queue = () => films.filter(f => f.status !== "watched")
+    .sort((a,b) => (a.addedAt||0) - (b.addedAt||0) || String(a.title).localeCompare(String(b.title)));
+  const watched = () => films.filter(f => f.status === "watched")
+    .sort((a,b) => (b.watchedAt||0) - (a.watchedAt||0));
+
+  function lsLoad(){ try{ const v = JSON.parse(localStorage.getItem(LS) || "[]"); return Array.isArray(v) ? v : []; }catch(e){ return []; } }
+  function lsSave(){ try{ localStorage.setItem(LS, JSON.stringify(films)); }catch(e){} }
+
+  function onWriteError(e){
+    const code = e && e.code;
+    if(code === "invalid_argument" || code === "not_granted" || code === "revoked"){
+      canWrite = false; render();
+      toast("Менять список у тебя нет доступа. Крутить колесо можно.");
+    } else if(code === "quota_exceeded"){
+      toast("Список переполнен. Удали пару старых фильмов.");
+    } else {
+      toast("Не сохранилось, попробуй ещё раз.");
+    }
+  }
+
+  async function addFilm(title, status){
+    status = status || "queue";
+    const same = films.find(f => String(f.title).trim().toLowerCase() === title.toLowerCase());
+    if(same){
+      if(status === "watched" && same.status !== "watched"){
+        await patch(same.id, {status:"watched", watchedAt:Date.now()});
+        toast("«" + same.title + "» перенесён в просмотренные");
+        return "moved";
+      }
+      toast("«" + title + "» уже есть в списке"); return false;
+    }
+    const body = {title, status, addedAt:Date.now(), watchedAt: status === "watched" ? Date.now() : null};
+    if(mode === "local"){
+      films.push(Object.assign({id:"l" + Date.now().toString(36) + Math.random().toString(36).slice(2,6)}, body));
+      lsSave(); render(); return true;
+    }
+    try{ await col.add(body); return true; }catch(e){ onWriteError(e); return false; }
+  }
+  async function patch(id, fields){
+    if(mode === "local"){
+      const f = films.find(x => x.id === id); if(!f) return;
+      Object.assign(f, fields); lsSave(); render(); return;
+    }
+    try{ await col.doc(id).update(fields); }catch(e){ onWriteError(e); }
+  }
+  async function remove(id){
+    if(mode === "local"){ films = films.filter(x => x.id !== id); lsSave(); render(); return; }
+    try{ await col.doc(id).delete(); }catch(e){ onWriteError(e); }
+  }
+
+  /* ---------- колесо ---------- */
+  const canvas = $("wheel");
+  function colorFor(i, n){
+    if(n > 1 && i === n-1 && (n-1) % SEG.length === 0) return SEG[2];
+    return SEG[i % SEG.length];
+  }
+  function fit(ctx, text, max){
+    if(ctx.measureText(text).width <= max) return text;
+    let t = text;
+    while(t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1);
+    return t.trim() + "…";
+  }
+  function draw(items){
+    const size = canvas.clientWidth; if(!size) return;
+    const dpr = window.devicePixelRatio || 1;
+    const px = Math.round(size * dpr);
+    if(canvas.width !== px){ canvas.width = px; canvas.height = px; }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,size,size);
+    const c = size/2, R = c - 8;
+
+    // обод
+    ctx.beginPath(); ctx.arc(c,c,R+5,0,Math.PI*2); ctx.fillStyle = "#0e0c14"; ctx.fill();
+
+    if(!items.length){
+      ctx.beginPath(); ctx.arc(c,c,R,0,Math.PI*2); ctx.fillStyle = "#1f1a2b"; ctx.fill();
+      ctx.setLineDash([6,8]); ctx.strokeStyle = "#352d49"; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#a89fbb"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = "600 15px Manrope, system-ui, sans-serif";
+      ctx.fillText(mode === "loading" ? "Загружаю…" : "Добавь фильмы", c, c);
+      return;
+    }
+    const n = items.length, seg = Math.PI*2/n;
+    for(let i=0;i<n;i++){
+      const a0 = rot + i*seg, col = colorFor(i,n);
+      ctx.beginPath(); ctx.moveTo(c,c); ctx.arc(c,c,R,a0,a0+seg); ctx.closePath();
+      ctx.fillStyle = col.bg; ctx.fill();
+      if(n > 1){ ctx.strokeStyle = "#15121d"; ctx.lineWidth = 2; ctx.stroke(); }
+      ctx.save(); ctx.translate(c,c); ctx.rotate(a0 + seg/2);
+      const fs = Math.max(10, Math.min(16, R*seg*0.36));
+      ctx.font = "700 " + fs + "px Manrope, system-ui, sans-serif";
+      ctx.fillStyle = col.fg; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.fillText(fit(ctx, String(items[i].title), R*0.66), R - 14, 0);
+      ctx.restore();
+    }
+    // лампочки по ободу
+    const bulbs = 24;
+    for(let b=0;b<bulbs;b++){
+      const a = b/bulbs*Math.PI*2;
+      ctx.beginPath(); ctx.arc(c + Math.cos(a)*(R+1), c + Math.sin(a)*(R+1), 2.2, 0, Math.PI*2);
+      ctx.fillStyle = b % 2 ? "#f2b544" : "#f3ebdb"; ctx.fill();
+    }
+    // центр
+    ctx.beginPath(); ctx.arc(c,c,R*0.13,0,Math.PI*2); ctx.fillStyle = "#15121d"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#f2b544"; ctx.stroke();
+  }
+
+  function rnd(){ try{ const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; }catch(e){ return Math.random(); } }
+
+  function spin(){
+    const items = queue();
+    if(spinning || !items.length) return;
+    hideTicket();
+    if(items.length === 1){ showTicket(items[0]); return; }
+    spinning = true; spinItems = items.slice(); render();
+    const n = items.length, seg = Math.PI*2/n;
+    const i = Math.floor(rnd()*n);
+    const jitter = (rnd()*0.7 - 0.35) * seg;
+    const base = -Math.PI/2 - (i + 0.5)*seg - jitter;
+    const TAU = Math.PI*2;
+    const diff = (((base - rot) % TAU) + TAU) % TAU;
+    const start = rot, target = rot + diff + TAU*(reduced ? 1 : 6);
+    const dur = reduced ? 700 : 5200, t0 = performance.now();
+    function frame(t){
+      const p = Math.min(1, (t - t0)/dur);
+      const e = 1 - Math.pow(1 - p, 4);
+      rot = start + (target - start)*e;
+      draw(spinItems);
+      if(p < 1){ requestAnimationFrame(frame); return; }
+      rot = rot % TAU;
+      const chosen = spinItems[i];
+      spinning = false; spinItems = null;
+      render(); showTicket(chosen);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function showTicket(f){
+    pick = f;
+    $("tTitle").textContent = f.title;
+    $("tNum").textContent = String(watched().length + 1);
+    $("ticket").hidden = false;
+  }
+  function hideTicket(){ pick = null; $("ticket").hidden = true; }
+
+  /* ---------- отрисовка ---------- */
+  const STATUS = {
+    loading:"Подключаю общий список…",
+    shared:"Общий список · изменения видны всем сразу",
+    stale:"Список пока не отвечает, показываю последнее",
+    local:"Список хранится в этом браузере",
+    error:"Общий список отключился. Обнови страницу"
+  };
+  function fmt(ms){
+    if(!ms) return "раньше";
+    const d = new Date(ms);
+    return String(d.getDate()).padStart(2,"0") + "." + String(d.getMonth()+1).padStart(2,"0");
+  }
+
+  function render(){
+    $("status").dataset.s = mode;
+    $("statusText").textContent = STATUS[mode];
+    const ro = !canWrite || mode === "error";
+    $("app").classList.toggle("ro", ro);
+    $("roNote").hidden = !ro || mode === "loading";
+    $("addInput").disabled = $("addBtn").disabled = mode === "loading";
+    $("addWInput").disabled = $("addWBtn").disabled = mode === "loading";
+
+    const q = queue(), w = watched();
+    $("qCount").textContent = q.length;
+    $("wCount").textContent = w.length;
+    $("spinBtn").disabled = spinning || !q.length;
+    $("spinBtn").textContent = spinning ? "Крутится…" : "Крутить";
+
+    const ql = $("qList"); ql.textContent = "";
+    if(!q.length){
+      const p = document.createElement("p"); p.className = "empty";
+      p.textContent = mode === "loading" ? "Загружаю фильмы…" : "Пока пусто. Впиши первый фильм выше.";
+      ql.appendChild(p);
+    }
+    q.forEach((f,i) => {
+      const li = document.createElement("li");
+      const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = colorFor(i, q.length).bg;
+      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
+      const del = document.createElement("button"); del.type = "button"; del.className = "mini write"; del.textContent = "Убрать";
+      del.addEventListener("click", () => {
+        if(del.classList.contains("confirm")){ remove(f.id); return; }
+        del.classList.add("confirm"); del.textContent = "Точно?";
+        setTimeout(() => { del.classList.remove("confirm"); del.textContent = "Убрать"; }, 3000);
+      });
+      const seen = document.createElement("button"); seen.type = "button"; seen.className = "mini write"; seen.textContent = "Смотрели";
+      seen.title = "Перенести в просмотренные без колеса";
+      seen.addEventListener("click", () => { patch(f.id, {status:"watched", watchedAt:Date.now()}); toast("«" + f.title + "» ушёл в просмотренные"); });
+      li.append(sw, nm, seen, del); ql.appendChild(li);
+    });
+
+    const wl = $("wList"); wl.textContent = "";
+    if(!w.length){
+      const p = document.createElement("p"); p.className = "empty";
+      p.textContent = "Здесь появятся фильмы после просмотра.";
+      wl.appendChild(p);
+    }
+    w.forEach(f => {
+      const li = document.createElement("li");
+      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = f.title;
+      const wh = document.createElement("span"); wh.className = "when"; wh.textContent = fmt(f.watchedAt);
+      const back = document.createElement("button"); back.type = "button"; back.className = "mini write"; back.textContent = "Вернуть";
+      back.addEventListener("click", () => patch(f.id, {status:"queue", watchedAt:null}));
+      li.append(nm, wh, back); wl.appendChild(li);
+    });
+
+    if(!spinning) draw(q);
+  }
+
+  let tt;
+  function toast(msg){
+    const t = $("toast"); t.textContent = msg; t.classList.add("on");
+    clearTimeout(tt); tt = setTimeout(() => t.classList.remove("on"), 2800);
+  }
+
+  /* ---------- события ---------- */
+  $("spinBtn").addEventListener("click", spin);
+  $("againBtn").addEventListener("click", spin);
+  $("watchBtn").addEventListener("click", async () => {
+    if(!pick) return;
+    const f = films.find(x => x.id === pick.id);
+    if(!f){ toast("Этот фильм уже убрали из списка"); hideTicket(); return; }
+    const title = f.title;
+    hideTicket();
+    await patch(f.id, {status:"watched", watchedAt:Date.now()});
+    toast("«" + title + "» ушёл в просмотренные");
+  });
+  $("addForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const inp = $("addInput"); const v = inp.value.replace(/\s+/g," ").trim();
+    if(!v) { inp.focus(); return; }
+    const ok = await addFilm(v);
+    if(ok){ inp.value = ""; toast("Добавлено: «" + v + "»"); }
+    inp.focus();
+  });
+  $("addWForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const inp = $("addWInput"); const v = inp.value.replace(/\s+/g," ").trim();
+    if(!v) { inp.focus(); return; }
+    const ok = await addFilm(v, "watched");
+    if(ok){ inp.value = ""; if(ok === true) toast("В просмотренные: «" + v + "»"); }
+    inp.focus();
+  });
+  let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if(!spinning) draw(queue()); }, 80); });
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if(!spinning) draw(queue()); });
+
+  /* ---------- запуск ---------- */
+  const SEED = [{"id": "s00", "title": "Волк с Уолл-стрит", "status": "queue", "addedAt": 1794423000000, "watchedAt": null}, {"id": "s01", "title": "Властелин колец: Братство кольца", "status": "queue", "addedAt": 1794423000001, "watchedAt": null}, {"id": "s02", "title": "Три билборда на границе Эббинга, Миссури", "status": "queue", "addedAt": 1794423000002, "watchedAt": null}, {"id": "s03", "title": "Под покровом ночи", "status": "queue", "addedAt": 1794423000003, "watchedAt": null}, {"id": "s04", "title": "Стрингер", "status": "queue", "addedAt": 1794423000004, "watchedAt": null}, {"id": "s05", "title": "Пленницы", "status": "queue", "addedAt": 1794423000005, "watchedAt": null}, {"id": "s06", "title": "Мальчик в полосатой пижаме", "status": "queue", "addedAt": 1794423000006, "watchedAt": null}, {"id": "s07", "title": "Безбрачная неделя", "status": "queue", "addedAt": 1794423000007, "watchedAt": null}, {"id": "s08", "title": "Семь психопатов", "status": "watched", "addedAt": 1794423000008, "watchedAt": null}, {"id": "s09", "title": "Пятница, 13-е. Часть 3", "status": "watched", "addedAt": 1794423000009, "watchedAt": null}, {"id": "s10", "title": "Большой Лебовски", "status": "watched", "addedAt": 1794423000010, "watchedAt": null}, {"id": "s11", "title": "Святые из Бундока", "status": "watched", "addedAt": 1794423000011, "watchedAt": null}, {"id": "s12", "title": "Горе-творец", "status": "watched", "addedAt": 1794423000012, "watchedAt": null}, {"id": "s13", "title": "Несносные боссы", "status": "watched", "addedAt": 1794423000013, "watchedAt": null}, {"id": "s14", "title": "Суперперцы", "status": "watched", "addedAt": 1794423000014, "watchedAt": null}, {"id": "s15", "title": "День шакала", "status": "watched", "addedAt": 1794423000015, "watchedAt": null}, {"id": "s16", "title": "Моби Дик", "status": "watched", "addedAt": 1794423000016, "watchedAt": null}];
+  function goLocal(){
+    mode = "local"; films = lsLoad();
+    let seeded = false; try{ seeded = localStorage.getItem(LS + "-seeded") === "1"; }catch(e){}
+    if(!films.length && !seeded){ films = SEED.map(f => Object.assign({}, f)); lsSave(); try{ localStorage.setItem(LS + "-seeded","1"); }catch(e){} }
+    render();
+  }
+
+  async function start(){
+    render();
+    if(!(window.claude && typeof window.claude.use === "function")){ goLocal(); return; }
+    let db = null;
+    try{ db = await window.claude.use("db"); }catch(e){ db = null; }
+    if(!db){ goLocal(); return; }
+    col = db.collection("films");
+
+    window.claude.use("user").then(async u => {
+      if(!u || typeof u.can !== "function") return;
+      try{ const c = await u.can("data.write"); if(c === false){ canWrite = false; render(); } }catch(e){}
+    }).catch(() => {});
+
+    const timer = setTimeout(() => { if(mode === "loading"){ mode = "stale"; render(); } }, 10000);
+    col.onSnapshot(snap => {
+      films = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+      if(!snap.metadata.fromCache){ clearTimeout(timer); mode = "shared"; }
+      else if(mode === "loading") mode = "shared";
+      render();
+    }, () => { clearTimeout(timer); mode = "error"; render(); });
+  }
+  start();
+})();
+</script>
+</body>
+</html>
