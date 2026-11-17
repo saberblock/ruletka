@@ -427,35 +427,78 @@ li:first-child{border-top:0}
   let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if(!spinning) draw(queue()); }, 80); });
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if(!spinning) draw(queue()); });
 
-  /* ---------- запуск ---------- */
-  const SEED = [{"id": "s00", "title": "Волк с Уолл-стрит", "status": "queue", "addedAt": 1794423000000, "watchedAt": null}, {"id": "s01", "title": "Властелин колец: Братство кольца", "status": "queue", "addedAt": 1794423000001, "watchedAt": null}, {"id": "s02", "title": "Три билборда на границе Эббинга, Миссури", "status": "queue", "addedAt": 1794423000002, "watchedAt": null}, {"id": "s03", "title": "Под покровом ночи", "status": "queue", "addedAt": 1794423000003, "watchedAt": null}, {"id": "s04", "title": "Стрингер", "status": "queue", "addedAt": 1794423000004, "watchedAt": null}, {"id": "s05", "title": "Пленницы", "status": "queue", "addedAt": 1794423000005, "watchedAt": null}, {"id": "s06", "title": "Мальчик в полосатой пижаме", "status": "queue", "addedAt": 1794423000006, "watchedAt": null}, {"id": "s07", "title": "Безбрачная неделя", "status": "queue", "addedAt": 1794423000007, "watchedAt": null}, {"id": "s08", "title": "Семь психопатов", "status": "watched", "addedAt": 1794423000008, "watchedAt": null}, {"id": "s09", "title": "Пятница, 13-е. Часть 3", "status": "watched", "addedAt": 1794423000009, "watchedAt": null}, {"id": "s10", "title": "Большой Лебовски", "status": "watched", "addedAt": 1794423000010, "watchedAt": null}, {"id": "s11", "title": "Святые из Бундока", "status": "watched", "addedAt": 1794423000011, "watchedAt": null}, {"id": "s12", "title": "Горе-творец", "status": "watched", "addedAt": 1794423000012, "watchedAt": null}, {"id": "s13", "title": "Несносные боссы", "status": "watched", "addedAt": 1794423000013, "watchedAt": null}, {"id": "s14", "title": "Суперперцы", "status": "watched", "addedAt": 1794423000014, "watchedAt": null}, {"id": "s15", "title": "День шакала", "status": "watched", "addedAt": 1794423000015, "watchedAt": null}, {"id": "s16", "title": "Моби Дик", "status": "watched", "addedAt": 1794423000016, "watchedAt": null}];
-  function goLocal(){
-    mode = "local"; films = lsLoad();
-    let seeded = false; try{ seeded = localStorage.getItem(LS + "-seeded") === "1"; }catch(e){}
-    if(!films.length && !seeded){ films = SEED.map(f => Object.assign({}, f)); lsSave(); try{ localStorage.setItem(LS + "-seeded","1"); }catch(e){} }
+  /* ---------- запуск: общий список в Firebase ---------- */
+  const DB = "https://ruletka-f12df-default-rtdb.europe-west1.firebasedatabase.app/ruletka";
+  const SEED = {"s00": {"title": "Волк с Уолл-стрит", "status": "queue", "addedAt": 1794423000000}, "s01": {"title": "Властелин колец: Братство кольца", "status": "queue", "addedAt": 1794423000001}, "s02": {"title": "Три билборда на границе Эббинга, Миссури", "status": "queue", "addedAt": 1794423000002}, "s03": {"title": "Под покровом ночи", "status": "queue", "addedAt": 1794423000003}, "s04": {"title": "Стрингер", "status": "queue", "addedAt": 1794423000004}, "s05": {"title": "Пленницы", "status": "queue", "addedAt": 1794423000005}, "s06": {"title": "Мальчик в полосатой пижаме", "status": "queue", "addedAt": 1794423000006}, "s07": {"title": "Безбрачная неделя", "status": "queue", "addedAt": 1794423000007}, "s08": {"title": "Семь психопатов", "status": "watched", "addedAt": 1794423000008}, "s09": {"title": "Пятница, 13-е. Часть 3", "status": "watched", "addedAt": 1794423000009}, "s10": {"title": "Большой Лебовски", "status": "watched", "addedAt": 1794423000010}, "s11": {"title": "Святые из Бундока", "status": "watched", "addedAt": 1794423000011}, "s12": {"title": "Горе-творец", "status": "watched", "addedAt": 1794423000012}, "s13": {"title": "Несносные боссы", "status": "watched", "addedAt": 1794423000013}, "s14": {"title": "Суперперцы", "status": "watched", "addedAt": 1794423000014}, "s15": {"title": "День шакала", "status": "watched", "addedAt": 1794423000015}, "s16": {"title": "Моби Дик", "status": "watched", "addedAt": 1794423000016}};
+  let store = {};
+  function sync(){
+    films = Object.keys(store).filter(id => store[id] && store[id].title)
+      .map(id => Object.assign({id}, store[id]));
     render();
   }
-
-  async function start(){
+  async function req(method, path, body){
+    const r = await fetch(DB + path + ".json", {
+      method, headers:{"Content-Type":"application/json"},
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if(!r.ok) throw {code:"http_" + r.status};
+    return r.json();
+  }
+  col = {
+    add: body => req("POST", "/films", body),
+    doc: id => ({
+      update: fields => req("PATCH", "/films/" + id, fields),
+      delete: () => req("DELETE", "/films/" + id)
+    })
+  };
+  function applyEvent(kind, msg){
+    const data = msg.data;
+    const parts = String(msg.path || "/").split("/").filter(Boolean);
+    if(!parts.length){
+      if(kind === "put") store = data || {};
+      else Object.keys(data || {}).forEach(k => { if(data[k] === null) delete store[k]; else store[k] = data[k]; });
+      return;
+    }
+    const id = parts[0];
+    if(parts.length === 1){
+      if(kind === "put"){ if(data === null) delete store[id]; else store[id] = data; }
+      else {
+        store[id] = Object.assign({}, store[id] || {}, data);
+        Object.keys(data || {}).forEach(k => { if(data[k] === null) delete store[id][k]; });
+      }
+      return;
+    }
+    store[id] = store[id] || {};
+    if(data === null) delete store[id][parts[1]]; else store[id][parts[1]] = data;
+  }
+  async function seedIfNeeded(){
+    try{
+      if(await req("GET", "/seeded")) return;
+      await req("PATCH", "/films", SEED);
+      await req("PUT", "/seeded", true);
+    }catch(e){}
+  }
+  function start(){
     render();
-    if(!(window.claude && typeof window.claude.use === "function")){ goLocal(); return; }
-    let db = null;
-    try{ db = await window.claude.use("db"); }catch(e){ db = null; }
-    if(!db){ goLocal(); return; }
-    col = db.collection("films");
-
-    window.claude.use("user").then(async u => {
-      if(!u || typeof u.can !== "function") return;
-      try{ const c = await u.can("data.write"); if(c === false){ canWrite = false; render(); } }catch(e){}
-    }).catch(() => {});
-
+    if(!("EventSource" in window)){ mode = "error"; render(); return; }
     const timer = setTimeout(() => { if(mode === "loading"){ mode = "stale"; render(); } }, 10000);
-    col.onSnapshot(snap => {
-      films = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
-      if(!snap.metadata.fromCache){ clearTimeout(timer); mode = "shared"; }
-      else if(mode === "loading") mode = "shared";
-      render();
-    }, () => { clearTimeout(timer); mode = "error"; render(); });
+    let first = true;
+    const es = new EventSource(DB + "/films.json");
+    const handle = kind => ev => {
+      let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+      if(!msg) return;
+      applyEvent(kind, msg);
+      if(first){
+        first = false; clearTimeout(timer);
+        if(msg.data === null && (msg.path || "/") === "/") seedIfNeeded();
+      }
+      mode = "shared"; sync();
+    };
+    es.addEventListener("put", handle("put"));
+    es.addEventListener("patch", handle("patch"));
+    es.addEventListener("cancel", () => { mode = "error"; render(); });
+    es.onerror = () => { if(mode === "shared"){ mode = "stale"; render(); } };
+    es.onopen = () => { if(mode === "stale"){ mode = "shared"; render(); } };
   }
   start();
 })();
