@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Мега-рулетка</title>
+<title>Кино-рулетка</title>
 <meta name="description" content="Кино-рулетка для вечеров в Дискорде: добавляешь фильмы, крутишь колесо, просмотренные уходят в отдельный список.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -122,9 +122,10 @@ form.f3 input[type=number]::-webkit-inner-spin-button,form.f3 input[type=number]
 <body>
 <div class="wrap" id="app">
   <header>
-    <h1>Мега-<span>рулетка</span></h1>
+    <h1>Кино-<span>рулетка</span></h1>
     <div class="hdr-right">
       <div class="status" id="status" data-s="loading"><span class="dot"></span><span id="statusText">Подключаю общий список…</span></div>
+      <a class="mini auth" href="./poker.html" style="text-decoration:none;display:inline-flex;align-items:center">🃏 Покер</a>
       <button class="mini auth" id="authBtn" type="button">Войти</button>
     </div>
   </header>
@@ -431,11 +432,11 @@ form.f3 input[type=number]::-webkit-inner-spin-button,form.f3 input[type=number]
     const base = -Math.PI/2 - (i + 0.5)*seg - jitter;
     const TAU = Math.PI*2;
     const diff = (((base - rot) % TAU) + TAU) % TAU;
-    const start = rot, target = rot + diff + TAU*(reduced ? 1 : 6);
-    const dur = reduced ? 700 : 5200, t0 = performance.now();
+    const start = rot, target = rot + diff + TAU*(reduced ? 1 : 14);
+    const dur = reduced ? 700 : 12000, t0 = performance.now();
     function frame(t){
       const p = Math.min(1, (t - t0)/dur);
-      const e = 1 - Math.pow(1 - p, 4);
+      const e = 1 - Math.pow(1 - p, 5);
       rot = start + (target - start)*e;
       draw(spinItems);
       if(p < 1){ requestAnimationFrame(frame); return; }
